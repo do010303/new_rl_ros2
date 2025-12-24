@@ -1,0 +1,37 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- Disable gravity for all links -->
+  <gazebo reference="base_link">
+    <gravity>false</gravity>
+  </gazebo>
+  
+  <gazebo reference="Link1_1">
+    <gravity>false</gravity>
+  </gazebo>
+  
+  <gazebo reference="Link2_1">
+    <gravity>false</gravity>
+  </gazebo>
+  
+  <gazebo reference="Link3_1">
+    <gravity>false</gravity>
+  </gazebo>
+  
+  <gazebo reference="Link4_1">
+    <gravity>false</gravity>
+  </gazebo>
+  
+  <gazebo reference="Link5_1">
+    <gravity>false</gravity>
+  </gazebo>
+  
+  <gazebo reference="Link6_1">
+    <gravity>false</gravity>
+  </gazebo>
+  
+  <gazebo reference="End-effector_1">
+    <gravity>false</gravity>
+  </gazebo>
+
+</robot>

@@ -1,0 +1,70 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- Macro to add coordinate frame visualization to a link -->
+  <xacro:macro name="add_frame_visual" params="link_name">
+    
+    <!-- X axis (Red) -->
+    <gazebo reference="${link_name}">
+      <visual name="${link_name}_x_axis">
+        <pose>0.025 0 0 0 1.5708 0</pose>
+        <geometry>
+          <cylinder>
+            <radius>0.002</radius>
+            <length>0.05</length>
+          </cylinder>
+        </geometry>
+        <material>
+          <ambient>1 0 0 1</ambient>
+          <diffuse>1 0 0 1</diffuse>
+        </material>
+      </visual>
+    </gazebo>
+    
+    <!-- Y axis (Green) -->
+    <gazebo reference="${link_name}">
+      <visual name="${link_name}_y_axis">
+        <pose>0 0.025 0 1.5708 0 0</pose>
+        <geometry>
+          <cylinder>
+            <radius>0.002</radius>
+            <length>0.05</length>
+          </cylinder>
+        </geometry>
+        <material>
+          <ambient>0 1 0 1</ambient>
+          <diffuse>0 1 0 1</diffuse>
+        </material>
+      </visual>
+    </gazebo>
+    
+    <!-- Z axis (Blue) -->
+    <gazebo reference="${link_name}">
+      <visual name="${link_name}_z_axis">
+        <pose>0 0 0.025 0 0 0</pose>
+        <geometry>
+          <cylinder>
+            <radius>0.002</radius>
+            <length>0.05</length>
+          </cylinder>
+        </geometry>
+        <material>
+          <ambient>0 0 1 1</ambient>
+          <diffuse>0 0 1 1</diffuse>
+        </material>
+      </visual>
+    </gazebo>
+    
+  </xacro:macro>
+
+  <!-- Add coordinate frames to key links -->
+  <xacro:add_frame_visual link_name="base_link"/>
+  <xacro:add_frame_visual link_name="Link1_1"/>
+  <xacro:add_frame_visual link_name="Link2_1"/>
+  <xacro:add_frame_visual link_name="Link3_1"/>
+  <xacro:add_frame_visual link_name="Link4_1"/>
+  <xacro:add_frame_visual link_name="Link5_1"/>
+  <xacro:add_frame_visual link_name="Link6_1"/>
+  <xacro:add_frame_visual link_name="End-effector_1"/>
+
+</robot>
