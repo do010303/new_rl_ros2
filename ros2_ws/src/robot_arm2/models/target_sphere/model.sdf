@@ -1,0 +1,48 @@
+<?xml version="1.0"?>
+<sdf version="1.8">
+  <model name="target_sphere">
+    <pose>0 -0.3 0.2 0 0 0</pose>
+    
+    <link name="sphere_link">
+      <!-- Very light inertial properties since sphere is kinematic -->
+      <inertial>
+        <mass>0.001</mass>  <!-- 1 gram - negligible mass -->
+        <inertia>
+          <ixx>0.000001</ixx>
+          <iyy>0.000001</iyy>
+          <izz>0.000001</izz>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyz>0</iyz>
+        </inertia>
+      </inertial>
+      
+      <gravity>0</gravity>  <!-- Disable gravity so sphere doesn't fall -->
+      
+      <!-- Enable kinematic mode - sphere is moved by external commands only -->
+      <kinematic>true</kinematic>
+      
+      <!-- NO COLLISION - Robot can pass through it -->
+      <!-- This allows the robot to reach the target without pushing the sphere -->
+
+      <visual name="visual">
+        <geometry>
+          <sphere>
+            <radius>0.01</radius>  <!-- 1cm radius = 2cm diameter -->
+          </sphere>
+        </geometry>
+        <material>
+          <ambient>1.0 0.0 0.0 1.0</ambient>  <!-- Red target for visibility -->
+          <diffuse>1.0 0.0 0.0 1.0</diffuse>
+          <specular>0.5 0.5 0.5 1.0</specular>
+        </material>
+      </visual>
+    </link>
+    
+    <!-- Make the model DYNAMIC but with fixed position via kinematic mode
+         This allows service calls to update the sphere position
+         BUT we disable physics interactions to prevent pushing -->
+    <static>false</static>
+    
+  </model>
+</sdf>

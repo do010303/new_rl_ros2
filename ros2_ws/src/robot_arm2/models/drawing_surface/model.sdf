@@ -1,0 +1,117 @@
+<?xml version="1.0"?>
+<sdf version="1.8">
+  <model name="drawing_surface">
+    <!-- Position at y = -30cm from robot base -->
+    <pose>0 -0.3 0.2 0 0 0</pose>
+    <static>true</static>
+    
+    <!-- Main drawing surface panel -->
+    <link name="surface_panel">
+      <pose>0 0 0 0 0 0</pose>
+      
+      <visual name="surface_visual">
+        <geometry>
+          <box>
+            <size>0.50 0.005 0.50</size>  <!-- 50cm x 0.5cm x 50cm -->
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.9 0.9 0.9 0.5</ambient>  <!-- Semi-transparent white -->
+          <diffuse>0.9 0.9 0.9 0.5</diffuse>
+          <specular>0.3 0.3 0.3 1.0</specular>
+        </material>
+      </visual>
+      
+      <collision name="surface_collision">
+        <geometry>
+          <box>
+            <size>0.50 0.005 0.50</size>
+          </box>
+        </geometry>
+      </collision>
+    </link>
+    
+    <!-- Workspace frame borders showing test window: x ∈ [-20, +20]cm, z ∈ [0, 40]cm -->
+    
+    <!-- Top border (z = 40cm from surface base) -->
+    <link name="top_border">
+      <pose>0 0 0.20 0 0 0</pose>  <!-- +20cm from center (center is at z=20cm) -->
+      <visual name="top_border_visual">
+        <geometry>
+          <box>
+            <size>0.40 0.01 0.01</size>  <!-- 40cm wide, 1cm thick -->
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.0 1.0 0.0 1.0</ambient>  <!-- Green -->
+          <diffuse>0.0 1.0 0.0 1.0</diffuse>
+        </material>
+      </visual>
+    </link>
+    
+    <!-- Bottom border (z = 0cm from surface base) -->
+    <link name="bottom_border">
+      <pose>0 0 -0.20 0 0 0</pose>  <!-- -20cm from center -->
+      <visual name="bottom_border_visual">
+        <geometry>
+          <box>
+            <size>0.40 0.01 0.01</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.0 1.0 0.0 1.0</ambient>  <!-- Green -->
+          <diffuse>0.0 1.0 0.0 1.0</diffuse>
+        </material>
+      </visual>
+    </link>
+    
+    <!-- Left border (x = -20cm) -->
+    <link name="left_border">
+      <pose>-0.20 0 0 0 0 0</pose>
+      <visual name="left_border_visual">
+        <geometry>
+          <box>
+            <size>0.01 0.01 0.40</size>  <!-- 1cm thick, 40cm tall -->
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.0 1.0 0.0 1.0</ambient>  <!-- Green -->
+          <diffuse>0.0 1.0 0.0 1.0</diffuse>
+        </material>
+      </visual>
+    </link>
+    
+    <!-- Right border (x = +20cm) -->
+    <link name="right_border">
+      <pose>0.20 0 0 0 0 0</pose>
+      <visual name="right_border_visual">
+        <geometry>
+          <box>
+            <size>0.01 0.01 0.40</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.0 1.0 0.0 1.0</ambient>  <!-- Green -->
+          <diffuse>0.0 1.0 0.0 1.0</diffuse>
+        </material>
+      </visual>
+    </link>
+    
+    <!-- Center marker for reference -->
+    <link name="center_marker">
+      <pose>0 0 0 0 0 0</pose>
+      <visual name="center_marker_visual">
+        <geometry>
+          <sphere>
+            <radius>0.005</radius>  <!-- 5mm radius -->
+          </sphere>
+        </geometry>
+        <material>
+          <ambient>0.0 0.0 1.0 1.0</ambient>  <!-- Blue -->
+          <diffuse>0.0 0.0 1.0 1.0</diffuse>
+        </material>
+      </visual>
+    </link>
+    
+  </model>
+</sdf>

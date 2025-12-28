@@ -1,13 +1,16 @@
 # 6-DOF Robot Arm Simulation - ROS2 Humble + Gazebo Fortress
 
-A complete ROS2 workspace for simulating and controlling a 6-DOF robot arm in Gazebo Fortress with full joint control and end-effector tracking.
+A complete ROS2 workspace for simulating and controlling a 6-DOF robot arm in Gazebo Fortress with full joint control, end-effector tracking, and **reinforcement learning training system**.
 
 ![ROS2 Humble](https://img.shields.io/badge/ROS2-Humble-blue)
 ![Gazebo](https://img.shields.io/badge/Gazebo-Fortress-orange)
 ![Ubuntu](https://img.shields.io/badge/Ubuntu-22.04-purple)
 
+![Robot in Gazebo](docs/robot_gazebo.png)
+
 ## 📋 Table of Contents
 - [Features](#features)
+- [**RL Training System**](#-rl-training-system-new) ⭐
 - [Prerequisites](#prerequisites)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
@@ -26,6 +29,94 @@ A complete ROS2 workspace for simulating and controlling a 6-DOF robot arm in Ga
 - ✅ **Fast Movement** - 30 rad/s joint velocity
 - ✅ **Dark Background** - easier on eyes
 - ✅ **RViz2** visualization support
+- ⭐ **RL Training System** - TD3 and SAC agents for autonomous learning
+
+## 🤖 RL Training System (NEW)
+
+### Overview
+Complete reinforcement learning training system for teaching the robot arm to reach target positions autonomously.
+
+**Key Features:**
+- **Dual Agent Support**: TD3 (Twin Delayed DDPG) and SAC (Soft Actor-Critic)
+- **6-DOF Inverse Kinematics**: Numerical IK solver utilizing all joints
+- **Comprehensive Logging**: Per-step distance, EE position, joint angles, movement tracking
+- **Training Statistics**: Auto-generated plots (rewards, success rate, losses) and CSV export
+- **Replay Buffer Persistence**: Auto-save best/periodic/final buffers for training continuation
+- **Interactive Menu**: Easy agent selection and configuration
+
+### Technical Details
+
+**State Space (23D):**
+- 6 joint positions
+- 6 joint velocities  
+- 6 target joint positions
+- 3 end-effector position (X, Y, Z)
+- 2 target position (X, Z)
+
+**Action Space (2D):**
+- Target X position in workspace
+- Target Z position in workspace
+
+**Reward Function:**
+- `-distance_to_target` (encourages minimization)
+- Success bonus for reaching within 5mm
+
+**IK Integration:**
+- RL learns target positions → IK translates to joint angles
+- Robot attempts movement even with IK errors < 200mm
+- Typical IK errors: 20-40mm (acceptable for learning)
+
+### Quick Start - RL Training
+
+```bash
+# Terminal 1: Launch Gazebo and ROS2 control
+cd ~/new_rl_ros2/ros2_ws
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+ros2 launch robot_arm2 rl_training.launch.py
+
+# Terminal 2: Start training
+cd ~/new_rl_ros2/ros2_ws/src/robot_arm2/scripts
+python3 train_robot.py
+```
+
+**Interactive Menu:**
+1. Manual Test Mode
+2. RL Training (TD3)
+3. RL Training (SAC)
+
+**Training Configuration:**
+- Episodes: User-specified
+- Max steps per episode: User-specified  
+- Optional: Load existing replay buffer to continue training
+
+### Training Results
+
+Results are automatically saved to `scripts/training_results/YYYYMMDD_HHMMSS/`:
+
+- **training_plot_*.png**: 4-subplot visualization
+  - Episode rewards with cumulative average
+  - Success rate with cumulative average
+  - Actor loss
+  - Critic loss
+- **training_data_*.csv**: Episode-by-episode metrics
+- **Models**: Best, periodic (every 25 episodes), and final checkpoints
+- **Replay Buffers**: Saved with each model for training continuation
+
+### Training Tips
+
+1. **Start Small**: Begin with 100 episodes to verify setup
+2. **Load Buffers**: Continue training by loading previous replay buffers
+3. **Monitor IK**: Typical errors 20-40mm are acceptable
+4. **Success Criteria**: Distance < 5mm to target
+5. **Patience**: Success rates improve gradually over episodes
+
+### Known Limitations
+
+- Target sphere visual randomization on hold (Gazebo Fortress limitation)
+- Training tracks correct internal target positions despite static visual sphere
+- IK errors typically 20-40mm (acceptable for RL learning)
+
 
 ## 🔧 Prerequisites
 
@@ -53,18 +144,6 @@ sudo apt install ros-humble-xacro
 ```
 
 ## 📦 Installation
-
-### 1. Clone the Repository
-
-```bash
-cd ~
-git clone https://github.com/do010303/new_rl_ros2.git
-cd new_rl_ros2
-```
-
-### 2. Build the Workspace
-
-```bash
 cd ros2_ws
 source /opt/ros/humble/setup.bash
 colcon build --packages-select robot_arm2
