@@ -43,16 +43,20 @@ except ImportError:
 
 
 # ============================================================================
-# WORKSPACE CONFIGURATION - Drawing Surface at Y = -30cm
+# WORKSPACE CONFIGURATION - 3D Workspace for Target Randomization
 # ============================================================================
 
-# Drawing surface parameters
-# The robot draws toward -Y axis, surface is at y = -30cm
-SURFACE_Y = -0.30  # Fixed at -30cm from robot base
-SURFACE_X_MIN = -0.20  # -20cm
-SURFACE_X_MAX = 0.20   # +20cm
-SURFACE_Z_MIN = 0.0    # 0cm (ground level)
-SURFACE_Z_MAX = 0.40   # 40cm
+# 3D workspace parameters (no longer fixed Y)
+# X: ±12cm from center
+# Y: 15cm to 40cm (toward -Y axis)
+# Z: 18cm to 42cm (centered at 30cm, ±12cm range)
+
+SURFACE_X_MIN = -0.12  # -12cm
+SURFACE_X_MAX = 0.12   # +12cm
+SURFACE_Y_MIN = -0.40  # -40cm (further from robot)
+SURFACE_Y_MAX = -0.15  # -15cm (closer to robot)
+SURFACE_Z_MIN = 0.18   # 18cm (30cm center - 12cm)
+SURFACE_Z_MAX = 0.42   # 42cm (30cm center + 12cm)
 
 # Target sphere radius (for border margin calculation)
 TARGET_RADIUS = 0.01  # 1cm radius
@@ -60,11 +64,12 @@ TARGET_RADIUS = 0.01  # 1cm radius
 # Workspace boundaries for target spawning (with 1cm margin from borders)
 # This ensures the 1cm radius target sphere stays fully within the workspace
 WORKSPACE_BOUNDS = {
-    'x_min': SURFACE_X_MIN + TARGET_RADIUS,  # -19cm
-    'x_max': SURFACE_X_MAX - TARGET_RADIUS,  # +19cm
-    'y': SURFACE_Y,                           # -30cm (fixed)
-    'z_min': SURFACE_Z_MIN + TARGET_RADIUS,  # 1cm
-    'z_max': SURFACE_Z_MAX - TARGET_RADIUS   # 39cm
+    'x_min': SURFACE_X_MIN + TARGET_RADIUS,  # -11cm
+    'x_max': SURFACE_X_MAX - TARGET_RADIUS,  # +11cm
+    'y_min': SURFACE_Y_MIN + TARGET_RADIUS,  # -39cm
+    'y_max': SURFACE_Y_MAX - TARGET_RADIUS,  # -16cm
+    'z_min': SURFACE_Z_MIN + TARGET_RADIUS,  # 19cm
+    'z_max': SURFACE_Z_MAX - TARGET_RADIUS   # 41cm
 }
 
 
@@ -119,14 +124,16 @@ class RLEnvironment(Node):
             np.pi/2, np.pi/2, np.pi/2, np.pi/2, np.pi/2, np.pi/2
         ])
         
-        # IK success tracking
+        # IK success tracking (legacy, not used with direct joint control)
         self.last_ik_success = 1.0
         
         # RL Spaces (Gym-compatible)
-        # ACTION SPACE: 2D target position on drawing surface (X, Z)
+        # ACTION SPACE: 6D joint angle DELTAS (radians) - Direct joint control!
+        # Each action is a change in joint angle, ±0.1 rad (~5.7°) per step
+        MAX_JOINT_DELTA = 0.1  # radians
         self.action_space = spaces.Box(
-            low=np.array([WORKSPACE_BOUNDS['x_min'], WORKSPACE_BOUNDS['z_min']]),
-            high=np.array([WORKSPACE_BOUNDS['x_max'], WORKSPACE_BOUNDS['z_max']]),
+            low=np.array([-MAX_JOINT_DELTA] * 6),
+            high=np.array([MAX_JOINT_DELTA] * 6),
             dtype=np.float32
         )
         
@@ -509,31 +516,27 @@ class RLEnvironment(Node):
         return self.get_state()
     
     def _randomize_target(self):
-        """Randomize target sphere position within workspace (with 1cm margin from borders)"""
-        # Random X and Z within workspace bounds (Y is fixed at drawing surface)
+        """Randomize target sphere position within 3D workspace"""
+        # Random X, Y, Z within workspace bounds (Y is now randomized too!)
         self.target_x = random.uniform(WORKSPACE_BOUNDS['x_min'], WORKSPACE_BOUNDS['x_max'])
+        self.target_y = random.uniform(WORKSPACE_BOUNDS['y_min'], WORKSPACE_BOUNDS['y_max'])
         self.target_z = random.uniform(WORKSPACE_BOUNDS['z_min'], WORKSPACE_BOUNDS['z_max'])
-        self.target_y = WORKSPACE_BOUNDS['y']  # Fixed at -30cm
-        
         
         # Update target sphere position in Gazebo
         self._update_target_position(self.target_x, self.target_y, self.target_z)
-        self.get_logger().info(f"   Target randomized to X={self.target_x:.3f}, Z={self.target_z:.3f} (Y={self.target_y:.3f})")
+        self.get_logger().info(f"   Target randomized to X={self.target_x:.3f}, Y={self.target_y:.3f}, Z={self.target_z:.3f}")
     
     def step(self, action: np.ndarray) -> Tuple[Optional[np.ndarray], float, bool, dict]:
         """
-        Execute one environment step
+        Execute one environment step using DIRECT JOINT CONTROL
         
         Args:
-            action: 2D target position [X, Z] in meters on drawing surface at Y=-30cm
+            action: 6D joint angle DELTAS (radians) to add to current joint positions
         
         Returns:
             Tuple of (next_state, reward, done, info)
         """
         self.current_step += 1
-        
-        # Extract target position from action (X, Z coordinates)
-        target_x, target_z = float(action[0]), float(action[1])
         
         # Get state before action
         state_before = self.get_state()
@@ -541,14 +544,23 @@ class RLEnvironment(Node):
             self.get_logger().error("State not available before action!")
             return None, -10.0, True, {'error': 'state_unavailable'}
         
-        # Calculate distance before
-        dist_before = state_before[15]  # dist_3d is at index 15
+        # Calculate distance before (dist_3d is at index 15 in 18D state)
+        dist_before = state_before[15]
         
-        # Execute action (IK + trajectory)
-        success, ik_success, ik_error = self._execute_target_action(target_x, target_z)
+        # DIRECT JOINT CONTROL: Add action (deltas) to current joint positions
+        current_joints = np.array(self.joint_positions)
+        target_joints = current_joints + np.array(action)
+        
+        # Clip to joint limits
+        target_joints = np.clip(target_joints, self.joint_limits_low, self.joint_limits_high)
+        
+        # Execute movement (no IK needed!)
+        success = self._move_to_joint_positions(target_joints, duration=0.5)
+        
+        # Wait for movement to complete and state to update
+        time.sleep(0.3)
         
         # Get state after action
-        time.sleep(0.1)  # Brief wait for state to update
         next_state = self.get_state()
         
         if next_state is None:
@@ -557,7 +569,13 @@ class RLEnvironment(Node):
         
         # Calculate reward
         dist_after = next_state[15]  # dist_3d
-        reward, done = self._calculate_reward(dist_after, dist_before, ik_success)
+        reward, done = self._calculate_reward(dist_after, dist_before)
+        
+        # Check for ground collision (Z < 0.01m)
+        if self.robot_z < 0.01:
+            reward = -50.0
+            done = True
+            self.get_logger().warn(f"⚠️ Ground collision! Z={self.robot_z:.3f}m")
         
         # Check episode termination
         if self.current_step >= self.max_episode_steps:
@@ -567,28 +585,24 @@ class RLEnvironment(Node):
         # Info dict
         info = {
             'distance': dist_after,
-            'ik_success': ik_success,
-            'ik_error': ik_error,
+            'success': success,
             'step': self.current_step
         }
         
         return next_state, reward, done, info
     
-    def _calculate_reward(self, dist_after: float, dist_before: float, ik_success: bool) -> Tuple[float, bool]:
+    def _calculate_reward(self, dist_after: float, dist_before: float) -> Tuple[float, bool]:
         """
-        Calculate reward based on distance to goal
+        Calculate reward based on distance to goal (no IK dependency)
         
         Reward structure:
         - Goal reached (dist < tolerance): +10.0
-        - Getting closer: +1.0 * improvement
-        - Getting farther: -1.0 * worsening
-        - IK failure: -5.0
+        - Getting closer: +10.0 * improvement
         - Step penalty: -0.1
         
         Args:
             dist_after: Distance to goal after action
             dist_before: Distance to goal before action
-            ik_success: Whether IK found valid solution
         
         Returns:
             Tuple of (reward, done)
@@ -608,10 +622,6 @@ class RLEnvironment(Node):
             
             # Step penalty (encourage efficiency)
             reward -= 0.1
-        
-        # IK failure penalty
-        if not ik_success:
-            reward -= 5.0
         
         return reward, done
     

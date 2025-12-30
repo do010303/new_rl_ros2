@@ -92,12 +92,17 @@ def train(args):
         # Create agent based on selection
         print(f"\n🤖 Creating {args.agent.upper()} agent...")
         
+        # Agent configuration for DIRECT JOINT CONTROL
+        # Action: 6D joint angle deltas (±0.1 rad per step)
+        # State: 18D observation from environment
+        MAX_JOINT_DELTA = 0.1  # radians (~5.7°)
+        
         if args.agent == 'td3':
             agent = TD3Agent(
-                state_dim=23,
-                action_dim=2,
-                max_action=np.array([0.20, 0.40]),  # X: ±20cm, Z: 40cm range
-                min_action=np.array([-0.20, 0.05]),
+                state_dim=18,  # 18D observation
+                action_dim=6,  # 6 joint angle deltas
+                max_action=np.array([MAX_JOINT_DELTA] * 6),
+                min_action=np.array([-MAX_JOINT_DELTA] * 6),
                 actor_lr=ACTOR_LR,
                 critic_lr=CRITIC_LR,
                 gamma=GAMMA,
@@ -105,17 +110,18 @@ def train(args):
                 batch_size=BATCH_SIZE,
                 buffer_size=BUFFER_SIZE
             )
-            print(f"TD3 Agent initialized:")
-            print(f"  State dim: 23, Action dim: 2")
+            print(f"TD3 Agent initialized (Direct Joint Control):")
+            print(f"  State dim: 18, Action dim: 6 (joint deltas)")
+            print(f"  Max delta: ±{np.degrees(MAX_JOINT_DELTA):.1f}° per step")
             print(f"  Device: {agent.device}")
             print(f"  Buffer size: {BUFFER_SIZE}, Batch size: {BATCH_SIZE}")
         
         elif args.agent == 'sac':
             agent = SACAgentGazebo(
-                state_dim=23,
-                n_actions=2,
-                max_action=np.array([0.20, 0.40]),
-                min_action=np.array([-0.20, 0.05]),
+                state_dim=18,  # 18D observation
+                n_actions=6,   # 6 joint angle deltas
+                max_action=np.array([MAX_JOINT_DELTA] * 6),
+                min_action=np.array([-MAX_JOINT_DELTA] * 6),
                 actor_lr=ACTOR_LR,
                 critic_lr=CRITIC_LR,
                 gamma=GAMMA,
@@ -124,6 +130,9 @@ def train(args):
                 buffer_size=BUFFER_SIZE,
                 auto_entropy_tuning=True
             )
+            print(f"SAC Agent initialized (Direct Joint Control):")
+            print(f"  State dim: 18, Action dim: 6 (joint deltas)")
+            print(f"  Max delta: ±{np.degrees(MAX_JOINT_DELTA):.1f}° per step")
         
         else:
             raise ValueError(f"Unknown agent: {args.agent}. Choose 'td3' or 'sac'")
