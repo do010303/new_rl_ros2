@@ -572,7 +572,15 @@ def main():
     choice = show_menu()
     
     if choice == '1':
-        manual_test_mode()
+        # Run manual test mode from control_robot.py
+        import subprocess
+        print("\n🎮 Starting Manual Test Mode...")
+        print("=" * 70)
+        subprocess.run(['python3', 'control_robot.py'], cwd=os.path.dirname(__file__))
+        print("\n" + "=" * 70)
+        print("Manual test mode exited. Returning to menu...")
+        print("=" * 70)
+        return  # Exit after manual mode
     elif choice == '2':
         args.agent = 'td3'
         # Get training parameters interactively
