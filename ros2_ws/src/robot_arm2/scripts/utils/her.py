@@ -1,9 +1,10 @@
 """Hindsight Experience Replay (HER) utilities for goal-based augmentation.
 
 This module provides a simple 'future' strategy HER augmentation function
-that works with the state format in `GazeboRLWrapper`:
-- achieved goal: indices 0:3 (end-effector XYZ)
-- desired goal (target): indices 7:10 (target XYZ)
+that works with the 18D state format in direct joint control:
+- State: [joints(6), robot_xyz(3), target_xyz(3), dist_xyz(3), dist_3d(1), vel(2)]
+- achieved goal: indices 6:9 (end-effector XYZ, i.e., robot_xyz)
+- desired goal (target): indices 9:12 (target_xyz)
 
 Usage:
     from utils.her import her_augmentation
@@ -18,8 +19,8 @@ import numpy as np
 def her_augmentation(agent, obs_list, actions_list, next_obs_list,
                      k=4,
                      strategy='future',
-                     achieved_idx=slice(0, 3),
-                     desired_idx=slice(7, 10),
+                     achieved_idx=slice(6, 9),   # robot_xyz in 18D state
+                     desired_idx=slice(9, 12),   # target_xyz in 18D state
                      goal_threshold=0.01,
                      success_reward=10.0,
                      step_reward=-1.0):
@@ -83,7 +84,7 @@ def her_augmentation(agent, obs_list, actions_list, next_obs_list,
                 done = False
 
             action = np.array(actions_list[t], dtype=np.float32)
-            agent.remember(state, action, reward, next_state, done)
+            agent.store_transition(state, action, reward, next_state, done)
             added += 1
 
     return added

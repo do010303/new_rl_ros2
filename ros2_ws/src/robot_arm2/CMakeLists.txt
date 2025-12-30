@@ -21,9 +21,16 @@ find_package(urdf REQUIRED)
 ################################################################################
 # Install
 ################################################################################
-install(DIRECTORY meshes urdf launch config worlds scripts
+# Install directories to share
+install(DIRECTORY meshes urdf launch config worlds scripts models
   DESTINATION share/${PROJECT_NAME}
   USE_SOURCE_PERMISSIONS
+)
+
+# Install executable scripts to lib for launch file access
+install(PROGRAMS
+  scripts/target_manager.py
+  DESTINATION lib/${PROJECT_NAME}
 )
 
 ################################################################################

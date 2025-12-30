@@ -11,6 +11,8 @@ build/
 # Training results and checkpoints
 scripts/training_results/
 scripts/checkpoints/
+scripts/rl/backup/
+reference/
 
 # ROS
 *.trans

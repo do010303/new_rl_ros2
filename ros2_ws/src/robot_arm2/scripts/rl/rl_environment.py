@@ -19,7 +19,6 @@ import random
 import time
 from typing import Tuple, Optional
 
-# ROS2 messages
 from sensor_msgs.msg import JointState
 from geometry_msgs.msg import Point, Pose, Quaternion
 from gazebo_msgs.msg import ModelStates
@@ -27,9 +26,6 @@ from trajectory_msgs.msg import JointTrajectoryPoint
 from control_msgs.action import FollowJointTrajectory
 from std_srvs.srv import Empty
 from builtin_interfaces.msg import Duration
-
-# Gazebo Fortress (Ignition) services
-from ros_gz_interfaces.srv import SpawnEntity, DeleteEntity
 
 # TF2 for end-effector tracking
 import tf2_ros
@@ -110,8 +106,8 @@ class RLEnvironment(Node):
         
         # Target sphere state (initial position at center of workspace)
         self.target_x = 0.0
-        self.target_y = SURFACE_Y
-        self.target_z = 0.20
+        self.target_y = (WORKSPACE_BOUNDS['y_min'] + WORKSPACE_BOUNDS['y_max']) / 2  # Center of Y workspace
+        self.target_z = 0.30  # Center of Z workspace
         
         # State readiness flag
         self.data_ready = False
@@ -137,31 +133,29 @@ class RLEnvironment(Node):
             dtype=np.float32
         )
         
-        # OBSERVATION SPACE: 18D state for 6-DOF
-        # [robot_xyz(3), joints(6), target_xyz(3), dist_xyz(3), dist_3d(1), ik_success(1), velocities(6)]
+        # OBSERVATION SPACE: 18D state for 6-DOF direct joint control
+        # [joints(6), robot_xyz(3), target_xyz(3), dist_xyz(3), dist_3d(1), key_velocities(2)]
         self.observation_space = spaces.Box(
             low=np.array([
-                -0.30, -0.40, 0.0,                                  # robot_xyz min (x, y, z)
-                -np.pi/2, -np.pi/2, -np.pi/2, -np.pi/2, -np.pi/2, -np.pi/2,  # joint limits min (±90°)
-                -0.30, -0.40, 0.0,                                  # target_xyz min
-                -0.60, -0.60, -0.60,                                 # dist_xyz min
+                -np.pi/2, -np.pi/2, -np.pi/2, -np.pi/2, -np.pi/2, -np.pi/2,  # joint limits min
+                -0.30, -0.50, 0.0,                                  # robot_xyz min
+                -0.30, -0.50, 0.0,                                  # target_xyz min
+                -0.60, -0.60, -0.60,                                # dist_xyz min
                 0.0,                                                 # dist_3d min
-                0.0,                                                 # ik_success min
-                -10.0, -10.0, -10.0, -10.0, -10.0, -10.0            # velocities min
+                -10.0, -10.0                                         # key velocities (joints 2,3)
             ]),
             high=np.array([
-                0.30, 0.0, 0.50,                                    # robot_xyz max (x, y, z)
-                np.pi/2, np.pi/2, np.pi/2, np.pi/2, np.pi/2, np.pi/2,  # joint limits max (±90°)
+                np.pi/2, np.pi/2, np.pi/2, np.pi/2, np.pi/2, np.pi/2,  # joint limits max
+                0.30, 0.0, 0.50,                                    # robot_xyz max
                 0.30, 0.0, 0.50,                                    # target_xyz max
                 0.60, 0.60, 0.60,                                    # dist_xyz max
                 1.0,                                                 # dist_3d max
-                1.0,                                                 # ik_success max
-                10.0, 10.0, 10.0, 10.0, 10.0, 10.0                  # velocities max
+                10.0, 10.0                                           # key velocities
             ]),
             dtype=np.float32
         )
         
-        self.get_logger().info(f"📊 Action space: 2D target [X, Z] on drawing surface at Y={SURFACE_Y}m")
+        self.get_logger().info(f"📊 Action space: 6D joint angle deltas (direct joint control)")
         self.get_logger().info(f"📊 Observation space: 18D state")
         
         # Target sphere state (static sphere in world file)
@@ -199,21 +193,17 @@ class RLEnvironment(Node):
         self.get_logger().info("✅ Trajectory action server connected!")
     
     def _setup_service_clients(self):
-        """Initialize service clients for Gazebo Fortress control"""
-        self.get_logger().info("⏳ Connecting to Gazebo Fortress services...")
+        """Initialize publishers for target teleportation"""
+        self.get_logger().info("⏳ Setting up publishers...")
         
-        # Services for spawning/deleting entities (Gazebo Fortress)
-        self.spawn_entity_client = self.create_client(
-            SpawnEntity,
-            '/world/default/create'
+        # Publisher for target position (target_manager subscribes and teleports sphere)
+        self.target_position_pub = self.create_publisher(
+            Point,
+            '/target_position',
+            10
         )
         
-        self.delete_entity_client = self.create_client(
-            DeleteEntity,
-            '/world/default/remove'
-        )
-        
-        self.get_logger().info("✅ Gazebo Fortress service clients created")
+        self.get_logger().info("✅ Publishers created")
     
     def _setup_subscribers(self):
         """Setup ROS2 subscribers for robot and environment state"""
@@ -309,126 +299,8 @@ class RLEnvironment(Node):
                 throttle_duration_sec=5.0
             )
     
-    def _spawn_target_sphere(self):
-        """Spawn the red target sphere in Gazebo"""
-        import os
-        from ament_index_python.packages import get_package_share_directory
-        
-        self.get_logger().info("🎯 Spawning target sphere...")
-        
-        try:
-            # Get model path
-            pkg_share = get_package_share_directory('robot_arm2')
-            model_path = os.path.join(pkg_share, 'models', 'target_sphere', 'model.sdf')
-            
-            # Read SDF file
-            with open(model_path, 'r') as f:
-                model_xml = f.read()
-            
-            # Create spawn request
-            req = SpawnEntity.Request()
-            req.name = 'target_sphere'
-            req.xml = model_xml
-            req.robot_namespace = ''
-            req.initial_pose = Pose()
-            req.initial_pose.position.x = 0.0
-            req.initial_pose.position.y = SURFACE_Y
-            req.initial_pose.position.z = 0.20
-            req.reference_frame = 'world'
-            
-            # Wait for service
-            if not self.spawn_entity_client.wait_for_service(timeout_sec=5.0):
-                self.get_logger().warn("⚠️ Spawn service not available, target will be spawned later")
-                return
-            
-            # Call service
-            future = self.spawn_entity_client.call_async(req)
-            rclpy.spin_until_future_complete(self, future, timeout_sec=5.0)
-            
-            if future.result() is not None and future.result().success:
-                self.target_spawned = True
-                self.get_logger().info("✅ Target sphere spawned successfully!")
-            else:
-                self.get_logger().warn("⚠️ Failed to spawn target sphere")
-                
-        except Exception as e:
-            self.get_logger().warn(f"⚠️ Could not spawn target sphere: {e}")
-    
-    def _spawn_target_sphere(self, x: float, y: float, z: float):
-        """
-        Spawn target sphere at specified position using Gazebo Fortress service
-        
-        Args:
-            x, y, z: Target position in meters
-        """
-        # SDF for red sphere (1cm radius)
-        sdf = f'''<?xml version="1.0"?>
-<sdf version="1.8">
-  <model name="target_sphere">
-    <static>true</static>
-    <pose>{x} {y} {z} 0 0 0</pose>
-    <link name="sphere_link">
-      <visual name="visual">
-        <geometry>
-          <sphere>
-            <radius>0.01</radius>
-          </sphere>
-        </geometry>
-        <material>
-          <ambient>1.0 0.0 0.0 1.0</ambient>
-          <diffuse>1.0 0.0 0.0 1.0</diffuse>
-        </material>
-      </visual>
-    </link>
-  </model>
-</sdf>'''
-        
-        try:
-            req = SpawnEntity.Request()
-            req.entity_factory.name = 'target_sphere'
-            req.entity_factory.sdf = sdf
-            req.entity_factory.allow_renaming = False
-            
-            if self.spawn_entity_client.service_is_ready():
-                future = self.spawn_entity_client.call_async(req)
-                rclpy.spin_until_future_complete(self, future, timeout_sec=2.0)
-                
-                if future.result() is not None and future.result().success:
-                    self.target_spawned = True
-                    self.get_logger().info(f"🎯 Spawned target at: X={x:.3f}, Y={y:.3f}, Z={z:.3f}")
-                else:
-                    self.get_logger().warn("Failed to spawn target sphere")
-            else:
-                self.get_logger().warn("Spawn service not ready!")
-        except Exception as e:
-            self.get_logger().error(f"Error spawning target: {e}")
-    
-    def _delete_target_sphere(self):
-        """Delete target sphere from Gazebo"""
-        if not self.target_spawned:
-            return
-        
-        try:
-            req = DeleteEntity.Request()
-            req.entity.name = 'target_sphere'
-            
-            if self.delete_entity_client.service_is_ready():
-                future = self.delete_entity_client.call_async(req)
-                rclpy.spin_until_future_complete(self, future, timeout_sec=1.0)
-                self.target_spawned = False
-                self.get_logger().info("🗑️  Deleted target sphere")
-        except Exception as e:
-            self.get_logger().warn(f"Error deleting target: {e}")
-    
-    def _update_target_position(self, x: float, y: float, z: float):
-        """
-        Update target sphere position by deleting and respawning
-        
-        Args:
-            x, y, z: Target position in meters
-        """
-        self._delete_target_sphere()
-        self._spawn_target_sphere(x, y, z)
+    # NOTE: Target sphere spawning is now handled by target_manager.py node
+    # This node uses Ignition Transport to spawn and teleport the visual sphere
     
     def get_state(self) -> Optional[np.ndarray]:
         """
@@ -467,10 +339,8 @@ class RLEnvironment(Node):
                 dist_x, dist_y, dist_z,
                 # Euclidean distance (1)
                 dist_3d,
-                # IK success flag (1)
-                self.last_ik_success,
-                # Joint velocities (6)
-                *self.joint_velocities
+                # Key joint velocities (2) - joints 2 and 3 are most important for reaching
+                self.joint_velocities[1], self.joint_velocities[2]
             ], dtype=np.float32)
             
             return state
@@ -517,14 +387,22 @@ class RLEnvironment(Node):
     
     def _randomize_target(self):
         """Randomize target sphere position within 3D workspace"""
-        # Random X, Y, Z within workspace bounds (Y is now randomized too!)
+        # Random X, Y, Z within workspace bounds
         self.target_x = random.uniform(WORKSPACE_BOUNDS['x_min'], WORKSPACE_BOUNDS['x_max'])
         self.target_y = random.uniform(WORKSPACE_BOUNDS['y_min'], WORKSPACE_BOUNDS['y_max'])
         self.target_z = random.uniform(WORKSPACE_BOUNDS['z_min'], WORKSPACE_BOUNDS['z_max'])
         
-        # Update target sphere position in Gazebo
-        self._update_target_position(self.target_x, self.target_y, self.target_z)
-        self.get_logger().info(f"   Target randomized to X={self.target_x:.3f}, Y={self.target_y:.3f}, Z={self.target_z:.3f}")
+        self.get_logger().info(f"   Target: X={self.target_x:.3f}, Y={self.target_y:.3f}, Z={self.target_z:.3f}")
+        
+        # Publish target position to target_manager node (teleports visual sphere)
+        try:
+            target_msg = Point()
+            target_msg.x = self.target_x
+            target_msg.y = self.target_y
+            target_msg.z = self.target_z
+            self.target_position_pub.publish(target_msg)
+        except Exception as e:
+            self.get_logger().debug(f"   Could not publish target position: {e}")
     
     def step(self, action: np.ndarray) -> Tuple[Optional[np.ndarray], float, bool, dict]:
         """
@@ -571,11 +449,15 @@ class RLEnvironment(Node):
         dist_after = next_state[15]  # dist_3d
         reward, done = self._calculate_reward(dist_after, dist_before)
         
-        # Check for ground collision (Z < 0.01m)
+        # Check for ground collision (Z < 0.01m) - AUTO RECOVERY
         if self.robot_z < 0.01:
             reward = -50.0
             done = True
-            self.get_logger().warn(f"⚠️ Ground collision! Z={self.robot_z:.3f}m")
+            self.get_logger().warn(f"⚠️ Ground collision! Z={self.robot_z:.3f}m - Resetting to home...")
+            # AUTO-RESET: Move robot to home position to prevent getting stuck
+            home_position = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+            self._move_to_joint_positions(home_position, duration=1.0)
+            time.sleep(0.5)  # Wait for recovery
         
         # Check episode termination
         if self.current_step >= self.max_episode_steps:
@@ -641,7 +523,7 @@ class RLEnvironment(Node):
         
         try:
             joint_angles, ik_success, ik_error = constrained_ik_6dof(
-                target_y=SURFACE_Y,  # Fixed Y at drawing surface
+                target_y=self.target_y,  # Use current target Y
                 target_z=target_z,
                 target_x=target_x,
                 initial_guess=self.joint_positions,  # Warm start from current position

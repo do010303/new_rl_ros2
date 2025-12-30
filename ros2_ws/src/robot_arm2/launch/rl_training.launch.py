@@ -114,7 +114,7 @@ def generate_launch_description():
             )
         ]
     )
-    
+
     # Bridge for Gazebo services (entity spawn/delete for target sphere)
     gz_bridge = Node(
         package='ros_gz_bridge',
@@ -125,6 +125,19 @@ def generate_launch_description():
         ],
         output='screen'
     )
+    
+    # Target Manager Node - handles visual target sphere teleportation
+    target_manager = TimerAction(
+        period=10.0,  # Wait for Gazebo to be fully ready
+        actions=[
+            Node(
+                package='robot_arm2',
+                executable='target_manager.py',
+                name='target_manager',
+                output='screen'
+            )
+        ]
+    )
 
     return LaunchDescription([
         set_gz_resource_path,  # Set environment variable first
@@ -134,4 +147,5 @@ def generate_launch_description():
         gz_bridge,  # Bridge for entity spawn/delete
         joint_state_broadcaster_spawner,
         arm_controller_spawner,
+        target_manager,  # Teleports target sphere during training
     ])

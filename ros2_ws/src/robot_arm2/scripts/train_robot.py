@@ -140,27 +140,44 @@ def train(args):
         # Ask to load existing replay buffer
         load_buffer = input("\n📦 Load existing replay buffer? (y/n): ").strip().lower()
         if load_buffer == 'y':
-            buffer_path = input("   Enter buffer path (e.g., training_results/.../replay_buffer_best.pkl): ").strip()
-            if os.path.exists(buffer_path):
+            # Auto-find best available buffer
+            import glob
+            buffer_files = glob.glob("training_results/*best*.pkl") + glob.glob("training_results/*final*.pkl")
+            buffer_files.sort(key=os.path.getmtime, reverse=True)  # Most recent first
+            
+            if buffer_files:
+                default_buffer = buffer_files[0]
+                print(f"   Found buffers: {len(buffer_files)}")
+                print(f"   Latest: {default_buffer}")
+                buffer_path = input(f"   Enter buffer path (or press Enter for default): ").strip()
+                if buffer_path == '':
+                    buffer_path = default_buffer
+            else:
+                print("   No buffer files found in training_results/")
+                buffer_path = input("   Enter buffer path manually: ").strip()
+            
+            if buffer_path and os.path.exists(buffer_path):
                 try:
                     agent.replay_buffer.load(buffer_path)
                     print(f"   ✅ Loaded replay buffer from: {buffer_path}")
                     print(f"   Buffer size: {agent.replay_buffer.size()}")
                 except Exception as e:
                     print(f"   ❌ Failed to load buffer: {e}")
-            else:
+            elif buffer_path:
                 print(f"   ❌ Buffer file not found: {buffer_path}")
         
         # Training statistics
         episode_rewards = []
         episode_successes = []
+        episode_min_distances = []  # Track min distance to target each episode
         best_avg_reward = -float('inf')
         actor_losses = []
         critic_losses = []
         
-        # Create results directory
-        results_dir = f"training_results/{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        # Create results directory (flat structure - no subfolders)
+        results_dir = "training_results"
         os.makedirs(results_dir, exist_ok=True)
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         
         print(f"\n📊 Training configuration:")
         print(f"   Episodes: {args.episodes}")
@@ -254,24 +271,29 @@ def train(args):
                 if done:
                     break
             
-            # HER augmentation
-            if HER_ENABLED and len(episode_buffer) > 0:
-                augmented_buffer = her_augmentation(
-                    episode_buffer,
-                    her_k=HER_K,
-                    strategy=HER_STRATEGY,
-                    goal_tolerance=GOAL_THRESHOLD
-                )
+            # Store original transitions and apply HER augmentation
+            if len(episode_buffer) > 0:
+                # Unpack episode buffer into separate lists
+                obs_list = [t[0] for t in episode_buffer]
+                actions_list = [t[1] for t in episode_buffer]
+                next_obs_list = [t[3] for t in episode_buffer]
                 
-                # Store all transitions in replay buffer
-                for transition in augmented_buffer:
-                    state_t, action_t, reward_t, next_state_t, done_t, _ = transition
-                    agent.store_transition(state_t, action_t, reward_t, next_state_t, done_t)
-            else:
-                # Store original transitions
+                # Store original transitions first
                 for transition in episode_buffer:
                     state_t, action_t, reward_t, next_state_t, done_t, _ = transition
                     agent.store_transition(state_t, action_t, reward_t, next_state_t, done_t)
+                
+                # HER augmentation - calls agent.remember() internally
+                if HER_ENABLED:
+                    her_augmentation(
+                        agent=agent,
+                        obs_list=obs_list,
+                        actions_list=actions_list,
+                        next_obs_list=next_obs_list,
+                        k=HER_K,
+                        strategy=HER_STRATEGY,
+                        goal_threshold=GOAL_THRESHOLD
+                    )
             
             # Training (after enough episodes)
             if episode >= LEARNING_STARTS:
@@ -289,31 +311,34 @@ def train(args):
             # Log episode results
             episode_rewards.append(episode_reward)
             episode_successes.append(1.0 if episode_success else 0.0)
+            episode_min_distances.append(min_distance)  # Track min distance
             
-            # Calculate statistics
-            avg_reward_10 = np.mean(episode_rewards[-10:]) if len(episode_rewards) >= 10 else np.mean(episode_rewards)
-            success_rate_10 = np.mean(episode_successes[-10:]) if len(episode_successes) >= 10 else np.mean(episode_successes)
+            # Calculate statistics (ALL episodes, not just last 10)
+            avg_reward = np.mean(episode_rewards)
+            success_rate = np.mean(episode_successes)
+            avg_min_dist = np.mean(episode_min_distances)
             
             episode_time = time.time() - episode_start
             
             print(f"Episode {episode+1}/{args.episodes} | "
                   f"Reward: {episode_reward:.2f} | "
+                  f"MinDist: {min_distance*100:.1f}cm | "
                   f"Success: {'✓' if episode_success else '✗'} | "
-                  f"Avg10: {avg_reward_10:.2f} | "
-                  f"SuccessRate10: {success_rate_10*100:.0f}% | "
+                  f"AvgReward: {avg_reward:.2f} | "
+                  f"SuccessRate: {success_rate*100:.0f}% | "
                   f"Time: {episode_time:.1f}s")
             
             # Save best model
-            if episode >= MIN_EPISODES and avg_reward_10 > best_avg_reward:
-                best_avg_reward = avg_reward_10
+            if episode >= MIN_EPISODES and avg_reward > best_avg_reward:
+                best_avg_reward = avg_reward
                 agent.save_models()
-                agent.replay_buffer.save(f'{results_dir}/replay_buffer_best.pkl')
+                agent.replay_buffer.save(f'{results_dir}/replay_buffer_best_{timestamp}.pkl')
                 print(f"   💾 New best model saved! Avg reward: {best_avg_reward:.2f}")
             
             # Periodic saves
             if (episode + 1) % SAVE_INTERVAL == 0:
                 agent.save_models(episode=episode+1)
-                agent.replay_buffer.save(f'{results_dir}/replay_buffer_ep_{episode+1}.pkl')
+                agent.replay_buffer.save(f'{results_dir}/replay_buffer_ep{episode+1}_{timestamp}.pkl')
                 print(f"   💾 Checkpoint saved (episode {episode+1})")
         
         # Training complete - comprehensive summary
@@ -324,33 +349,32 @@ def train(args):
         # Overall statistics
         overall_avg_reward = np.mean(episode_rewards)
         overall_success_rate = np.mean(episode_successes)
+        overall_avg_min_dist = np.mean(episode_min_distances)
+        best_min_dist = min(episode_min_distances)
         
         print(f"\n📊 Overall Statistics ({args.episodes} episodes):")
         print(f"   Average Reward: {overall_avg_reward:.2f}")
         print(f"   Success Rate: {overall_success_rate*100:.1f}%")
-        print(f"   Best Reward (single episode): {max(episode_rewards):.2f}")
-        print(f"   Worst Reward (single episode): {min(episode_rewards):.2f}")
-        
-        print(f"\n📈 Recent Performance (last 10 episodes):")
-        print(f"   Average Reward: {avg_reward_10:.2f}")
-        print(f"   Success Rate: {success_rate_10*100:.0f}%")
-        print(f"   Best Average Reward: {best_avg_reward:.2f}")
+        print(f"   Average Min Distance: {overall_avg_min_dist*100:.2f}cm")
+        print(f"   Best Min Distance: {best_min_dist*100:.2f}cm")
+        print(f"   Best Episode Reward: {max(episode_rewards):.2f}")
+        print(f"   Worst Episode Reward: {min(episode_rewards):.2f}")
         
         # Loss statistics (if available)
         if actor_losses and any(l is not None for l in actor_losses):
             valid_actor_losses = [l for l in actor_losses if l is not None]
             valid_critic_losses = [l for l in critic_losses if l is not None]
             if valid_actor_losses:
-                print(f"\n� Training Losses:")
+                print(f"\n📉 Training Losses:")
                 print(f"   Average Actor Loss: {np.mean(valid_actor_losses):.4f}")
                 print(f"   Average Critic Loss: {np.mean(valid_critic_losses):.4f}")
         
-        # Plot training statistics
-        plot_training_stats(episode_rewards, episode_successes, actor_losses, critic_losses, results_dir)
+        # Plot training statistics (with distance data)
+        plot_training_stats(episode_rewards, episode_successes, episode_min_distances, actor_losses, critic_losses, results_dir, timestamp)
         
         # Save final model
         agent.save_models()
-        agent.replay_buffer.save(f'{results_dir}/replay_buffer_final.pkl')
+        agent.replay_buffer.save(f'{results_dir}/replay_buffer_final_{timestamp}.pkl')
         print(f"\n💾 Final model saved")
         print(f"\n✅ Training complete! Trained for {args.episodes} episodes.")
         
@@ -365,8 +389,8 @@ def train(args):
         rclpy.shutdown()
 
 
-def plot_training_stats(episode_rewards, episode_successes, actor_losses, critic_losses, results_dir):
-    """Plot training statistics with cumulative moving averages"""
+def plot_training_stats(episode_rewards, episode_successes, episode_min_distances, actor_losses, critic_losses, results_dir, timestamp):
+    """Plot training statistics with cumulative moving averages including distance"""
     episodes = np.arange(1, len(episode_rewards) + 1)
     
     # Calculate cumulative average (tracks all episodes up to current point)
@@ -375,9 +399,14 @@ def plot_training_stats(episode_rewards, episode_successes, actor_losses, critic
     
     reward_avg = cumulative_avg(episode_rewards)
     success_avg = cumulative_avg(episode_successes)
+    distance_avg = cumulative_avg(episode_min_distances)
     
-    # Create figure with 2x2 subplots
-    fig, axes = plt.subplots(2, 2, figsize=(15, 10))
+    # Convert distances to cm
+    distances_cm = [d * 100 for d in episode_min_distances]
+    distance_avg_cm = [d * 100 for d in distance_avg]
+    
+    # Create figure with 3x2 subplots
+    fig, axes = plt.subplots(2, 3, figsize=(18, 10))
     fig.suptitle('Training Statistics', fontsize=16, fontweight='bold')
     
     # Plot 1: Episode Rewards (top-left)
@@ -390,7 +419,7 @@ def plot_training_stats(episode_rewards, episode_successes, actor_losses, critic
     ax.legend(fontsize=10)
     ax.grid(True, alpha=0.3)
     
-    # Plot 2: Success Rate (top-right)
+    # Plot 2: Success Rate (top-center)
     ax = axes[0, 1]
     success_pct = np.array(episode_successes) * 100
     success_avg_pct = np.array(success_avg) * 100
@@ -403,7 +432,18 @@ def plot_training_stats(episode_rewards, episode_successes, actor_losses, critic
     ax.legend(fontsize=10)
     ax.grid(True, alpha=0.3)
     
-    # Plot 3: Actor Loss (bottom-left)
+    # Plot 3: Min Distance to Target (top-right) - NEW!
+    ax = axes[0, 2]
+    ax.plot(episodes, distances_cm, alpha=0.3, color='orange', linewidth=1.5, label='Episode Min Distance')
+    ax.plot(episodes, distance_avg_cm, color='darkorange', linewidth=3.0, label='Cumulative Average')
+    ax.axhline(y=1.0, color='red', linestyle='--', linewidth=2, label='Goal (1cm)')
+    ax.set_xlabel('Episode', fontsize=12)
+    ax.set_ylabel('Distance (cm)', fontsize=12)
+    ax.set_title('Min Distance to Target', fontsize=14, fontweight='bold')
+    ax.legend(fontsize=10)
+    ax.grid(True, alpha=0.3)
+    
+    # Plot 4: Actor Loss (bottom-left)
     ax = axes[1, 0]
     valid_actor = [(i+1, l) for i, l in enumerate(actor_losses) if l is not None]
     if valid_actor:
@@ -418,7 +458,7 @@ def plot_training_stats(episode_rewards, episode_successes, actor_losses, critic
         ax.text(0.5, 0.5, 'No Actor Loss Data', ha='center', va='center', fontsize=12)
         ax.set_title('Actor Loss', fontsize=14, fontweight='bold')
     
-    # Plot 4: Critic Loss (bottom-right)
+    # Plot 5: Critic Loss (bottom-center)
     ax = axes[1, 1]
     valid_critic = [(i+1, l) for i, l in enumerate(critic_losses) if l is not None]
     if valid_critic:
@@ -433,10 +473,33 @@ def plot_training_stats(episode_rewards, episode_successes, actor_losses, critic
         ax.text(0.5, 0.5, 'No Critic Loss Data', ha='center', va='center', fontsize=12)
         ax.set_title('Critic Loss', fontsize=14, fontweight='bold')
     
+    # Plot 6: Combined Summary (bottom-right)
+    ax = axes[1, 2]
+    ax.axis('off')
+    summary_text = f"""
+📊 Training Summary
+━━━━━━━━━━━━━━━━━━━━
+
+Episodes: {len(episode_rewards)}
+
+Rewards:
+  • Final Avg: {reward_avg[-1]:.2f}
+  • Best: {max(episode_rewards):.2f}
+
+Success Rate:
+  • Final: {success_avg_pct[-1]:.1f}%
+
+Distance to Target:
+  • Final Avg: {distance_avg_cm[-1]:.2f}cm
+  • Best: {min(distances_cm):.2f}cm
+    """
+    ax.text(0.1, 0.5, summary_text, transform=ax.transAxes, fontsize=12,
+            verticalalignment='center', fontfamily='monospace',
+            bbox=dict(boxstyle='round', facecolor='lightgray', alpha=0.5))
+    
     plt.tight_layout()
     
     # Save plot
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     plot_path = f'{results_dir}/training_plot_{timestamp}.png'
     plt.savefig(plot_path, dpi=150, bbox_inches='tight')
     plt.close()
@@ -448,14 +511,16 @@ def plot_training_stats(episode_rewards, episode_successes, actor_losses, critic
     csv_path = f'{results_dir}/training_data_{timestamp}.csv'
     with open(csv_path, 'w', newline='') as f:
         writer = csv.writer(f)
-        writer.writerow(['Episode', 'Reward', 'Success', 'Actor_Loss', 'Critic_Loss'])
+        writer.writerow(['Episode', 'Reward', 'Success', 'MinDistance_cm', 'Actor_Loss', 'Critic_Loss'])
         for i in range(len(episode_rewards)):
             actor_loss = actor_losses[i] if i < len(actor_losses) and actor_losses[i] is not None else ''
             critic_loss = critic_losses[i] if i < len(critic_losses) and critic_losses[i] is not None else ''
+            min_dist = episode_min_distances[i] * 100 if i < len(episode_min_distances) else ''
             writer.writerow([
                 i+1,
                 f'{episode_rewards[i]:.3f}',
                 int(episode_successes[i]),
+                f'{min_dist:.3f}' if min_dist != '' else '',
                 f'{actor_loss:.6f}' if actor_loss != '' else '',
                 f'{critic_loss:.6f}' if critic_loss != '' else ''
             ])
