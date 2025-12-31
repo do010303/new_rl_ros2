@@ -142,19 +142,20 @@ def train(args):
         if load_buffer == 'y':
             # Auto-find best available buffer
             import glob
-            buffer_files = glob.glob("training_results/*best*.pkl") + glob.glob("training_results/*final*.pkl")
+            buffer_files = glob.glob("training_results/pkl/*best*.pkl") + glob.glob("training_results/pkl/*final*.pkl")
             buffer_files.sort(key=os.path.getmtime, reverse=True)  # Most recent first
             
             if buffer_files:
                 default_buffer = buffer_files[0]
                 print(f"   Found buffers: {len(buffer_files)}")
                 print(f"   Latest: {default_buffer}")
-                buffer_path = input(f"   Enter buffer path (or press Enter for default): ").strip()
+                buffer_path = input(f"   Enter path (Enter = load best buffer): ").strip()
                 if buffer_path == '':
                     buffer_path = default_buffer
             else:
-                print("   No buffer files found in training_results/")
-                buffer_path = input("   Enter buffer path manually: ").strip()
+                print("   No buffer files found in training_results/pkl/")
+                print("   Example: training_results/pkl/replay_buffer_best_20251231_143000.pkl")
+                buffer_path = input("   Enter path (Enter = skip): ").strip()
             
             if buffer_path and os.path.exists(buffer_path):
                 try:
@@ -174,9 +175,14 @@ def train(args):
         actor_losses = []
         critic_losses = []
         
-        # Create results directory (flat structure - no subfolders)
+        # Create results directory structure
         results_dir = "training_results"
-        os.makedirs(results_dir, exist_ok=True)
+        csv_dir = f"{results_dir}/csv"
+        pkl_dir = f"{results_dir}/pkl"
+        png_dir = f"{results_dir}/png"
+        os.makedirs(csv_dir, exist_ok=True)
+        os.makedirs(pkl_dir, exist_ok=True)
+        os.makedirs(png_dir, exist_ok=True)
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         
         print(f"\n📊 Training configuration:")
@@ -332,13 +338,13 @@ def train(args):
             if episode >= MIN_EPISODES and avg_reward > best_avg_reward:
                 best_avg_reward = avg_reward
                 agent.save_models()
-                agent.replay_buffer.save(f'{results_dir}/replay_buffer_best_{timestamp}.pkl')
+                agent.replay_buffer.save(f'{pkl_dir}/replay_buffer_best_{timestamp}.pkl')
                 print(f"   💾 New best model saved! Avg reward: {best_avg_reward:.2f}")
             
             # Periodic saves
             if (episode + 1) % SAVE_INTERVAL == 0:
                 agent.save_models(episode=episode+1)
-                agent.replay_buffer.save(f'{results_dir}/replay_buffer_ep{episode+1}_{timestamp}.pkl')
+                agent.replay_buffer.save(f'{pkl_dir}/replay_buffer_ep{episode+1}_{timestamp}.pkl')
                 print(f"   💾 Checkpoint saved (episode {episode+1})")
         
         # Training complete - comprehensive summary
@@ -370,11 +376,11 @@ def train(args):
                 print(f"   Average Critic Loss: {np.mean(valid_critic_losses):.4f}")
         
         # Plot training statistics (with distance data)
-        plot_training_stats(episode_rewards, episode_successes, episode_min_distances, actor_losses, critic_losses, results_dir, timestamp)
+        plot_training_stats(episode_rewards, episode_successes, episode_min_distances, actor_losses, critic_losses, png_dir, csv_dir, timestamp)
         
         # Save final model
         agent.save_models()
-        agent.replay_buffer.save(f'{results_dir}/replay_buffer_final_{timestamp}.pkl')
+        agent.replay_buffer.save(f'{pkl_dir}/replay_buffer_final_{timestamp}.pkl')
         print(f"\n💾 Final model saved")
         print(f"\n✅ Training complete! Trained for {args.episodes} episodes.")
         
@@ -389,7 +395,7 @@ def train(args):
         rclpy.shutdown()
 
 
-def plot_training_stats(episode_rewards, episode_successes, episode_min_distances, actor_losses, critic_losses, results_dir, timestamp):
+def plot_training_stats(episode_rewards, episode_successes, episode_min_distances, actor_losses, critic_losses, png_dir, csv_dir, timestamp):
     """Plot training statistics with cumulative moving averages including distance"""
     episodes = np.arange(1, len(episode_rewards) + 1)
     
@@ -500,7 +506,7 @@ Distance to Target:
     plt.tight_layout()
     
     # Save plot
-    plot_path = f'{results_dir}/training_plot_{timestamp}.png'
+    plot_path = f'{png_dir}/training_plot_{timestamp}.png'
     plt.savefig(plot_path, dpi=150, bbox_inches='tight')
     plt.close()
     
@@ -508,7 +514,7 @@ Distance to Target:
     
     # Save CSV
     import csv
-    csv_path = f'{results_dir}/training_data_{timestamp}.csv'
+    csv_path = f'{csv_dir}/training_data_{timestamp}.csv'
     with open(csv_path, 'w', newline='') as f:
         writer = csv.writer(f)
         writer.writerow(['Episode', 'Reward', 'Success', 'MinDistance_cm', 'Actor_Loss', 'Critic_Loss'])

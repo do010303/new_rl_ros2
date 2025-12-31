@@ -12,18 +12,19 @@ def generate_launch_description():
     # Get package share directory
     pkg_share = FindPackageShare('robot_arm2').find('robot_arm2')
     
-    # Set Gazebo resource path to find custom models
+    # Set Gazebo resource path to find custom models and meshes
     models_path = os.path.join(pkg_share, 'models')
     worlds_path = os.path.join(pkg_share, 'worlds')
+    share_parent = os.path.dirname(pkg_share)  # Parent of pkg_share so model://robot_arm2/... works
     
     # Get existing GZ_SIM_RESOURCE_PATH or empty string
     gz_resource_path = os.environ.get('GZ_SIM_RESOURCE_PATH', '')
     
-    # Append our paths
+    # Append our paths - include share_parent so model://robot_arm2/ can resolve
     if gz_resource_path:
-        new_gz_resource_path = f"{gz_resource_path}:{models_path}:{pkg_share}"
+        new_gz_resource_path = f"{gz_resource_path}:{models_path}:{share_parent}"
     else:
-        new_gz_resource_path = f"{models_path}:{pkg_share}"
+        new_gz_resource_path = f"{models_path}:{share_parent}"
     
     # Set environment variable
     set_gz_resource_path = SetEnvironmentVariable(
